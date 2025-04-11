@@ -3,19 +3,6 @@ from vllm import LLM, SamplingParams
 from tqdm import tqdm
 from huggingface_hub import login
 
-# ========== CONFIG ==========
-MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
-MAX_EXAMPLES = 30000  # Change as needed
-USE_CUDA = True
-DEVICE = "cuda" if USE_CUDA else "cpu"
-BATCH_SIZE = 8
-AMR_CONTEXT_LENGTH = 128
-TEXT_CONTEXT_LENGTH = 64
-
-# ========== INIT MODEL ==========
-sampling_params = SamplingParams(temperature=0.0, max_tokens=5)
-llm = LLM(model=MODEL_NAME, dtype="float16")
-
 
 # ========== LOAD DATA ==========
 def load_hans_amr(file_path):
@@ -51,6 +38,12 @@ def load_hans_amr(file_path):
             i += 1
     return examples
 
+def load_gold_labels(filename):
+    with open(filename, "r", encoding="utf-8") as f:
+        ent_to_bool = {"non-entailment": "no", "entailment": "yes"}
+        labels = [ent_to_bool[line.strip().split('\t')[2]] for line in f]
+
+    return labels
 
 # ========== PROMPT FORMATTING ==========
 def format_prompt(premise, hypothesis, amr_premise=None, amr_hypothesis=None, use_amr=False):
@@ -65,19 +58,28 @@ Hypothesis: {hypothesis}
 Hypothesis AMR:
 {amr_hypothesis}
 
-Does the hypothesis logically follow from the premise?"""
+Does the hypothesis logically follow from the premise?
+
+Answer:"""
     else:
         prompt = f"""You are a helpful assistant trained to determine whether a hypothesis logically follows from a premise. Respond with 'Yes' or 'No'.
 
 Premise: {premise}
 Hypothesis: {hypothesis}
 
-Does the hypothesis logically follow from the premise?"""
+Does the hypothesis logically follow from the premise?
+
+Answer:"""
     return prompt
 
 
 def extract_yes_no(output_text):
-    return "yes" if "yes" in output_text.lower() else "no"
+    if "yes" in output_text.lower():
+        return "yes"
+    elif "no" in output_text.lower():
+        return "no"
+    else:
+        return ""
 
 
 # ========== INFERENCE ==========
@@ -90,6 +92,9 @@ def batch_infer(prompts):
 def main():
     data = load_hans_amr("hans_amr.txt")
     data = data[:MAX_EXAMPLES]
+
+    gold_labels = load_gold_labels("hans-data.txt")
+    gold_labels = gold_labels[:len(data)]
 
     predictions_text = []
     predictions_amr = []
@@ -113,9 +118,6 @@ def main():
 
     print("Evaluating accuracy...")
 
-    gold_labels = ["no"] * 15000 + ["yes"] * 15000
-    gold_labels = gold_labels[:len(data)]
-
     correct_text = sum(p == g for p, g in zip(predictions_text, gold_labels))
     correct_amr = sum(p == g for p, g in zip(predictions_amr, gold_labels))
 
@@ -134,4 +136,17 @@ def main():
 
 if __name__ == "__main__":
     login(token=open("hf_token.txt").read())
+    # ========== CONFIG ==========
+    MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+    MAX_EXAMPLES = 30000  # Change as needed
+    USE_CUDA = True
+    DEVICE = "cuda" if USE_CUDA else "cpu"
+    BATCH_SIZE = 8
+    AMR_CONTEXT_LENGTH = 128
+    TEXT_CONTEXT_LENGTH = 64
+
+    # ========== INIT MODEL ==========
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=5)
+    llm = LLM(model=MODEL_NAME, dtype="float16")
+
     main()
