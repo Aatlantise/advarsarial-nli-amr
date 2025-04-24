@@ -1,2 +1,6 @@
 vllm
 tqdm
+transformers
+datasets
+pandas
+accelerate>=0.26.0

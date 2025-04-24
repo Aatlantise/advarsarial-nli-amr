@@ -12,4 +12,4 @@
 
 source env.sh
 
-python main.py
+python bert.py
