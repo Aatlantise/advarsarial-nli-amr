@@ -3,6 +3,17 @@ import re
 from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset, load_dataset
 import torch
+import random
+import numpy as np
+import argparse
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # === 1. Load AMRs ===
 def load_amrs(file_path):
@@ -52,13 +63,18 @@ def compute_metrics(p):
     return {"accuracy": acc}
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    args = parser.parse_args()
+
     mnli_sents, mnli_amrs = load_amrs("mnli_amr_400k.txt")
     mnli_data = []
 
     mnli = load_dataset("multi_nli")
     mnli_binary = mnli["train"].map(binary_label)
 
-    n = 67692
+    # n = 67692
+    n = 100
     for i in range(0, n, 2):
 
 
@@ -125,6 +141,7 @@ if __name__ == "__main__":
         save_strategy="epoch",
         logging_dir="./logs",
         load_best_model_at_end=True,
+        disable_tqdm=True
     )
 
     trainer = Trainer(

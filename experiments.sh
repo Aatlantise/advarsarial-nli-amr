@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name="nli-amr"
+#SBATCH --job-name="nli-amr-bert"
 #SBATCH --output="%x.o%j"
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -12,4 +12,8 @@
 
 source env.sh
 
-python bert.py
+python bert.py --seed 1
+python bert.py --seed 2
+python bert.py --seed 3
+python bert.py --seed 4
+python bert.py --seed 5
