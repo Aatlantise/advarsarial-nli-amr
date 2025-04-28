@@ -12,8 +12,4 @@
 
 source env.sh
 
-python bert.py --seed 1
-python bert.py --seed 2
-python bert.py --seed 3
-python bert.py --seed 4
-python bert.py --seed 5
+python bert.py
