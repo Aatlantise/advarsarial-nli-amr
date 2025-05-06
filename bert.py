@@ -6,6 +6,22 @@ import torch
 import random
 import numpy as np
 import argparse
+import numpy as np
+from sklearn.metrics import accuracy_score
+
+def compute_binary_hans_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=1)
+
+    # Collapse 3-class predictions into 2-class
+    # Entailment (label 0) → 1
+    # Neutral (1) or Contradiction (2) → 0
+    collapsed_preds = np.where(preds == 0, 1, 1)  # 0 = entailment, 1 = non-entailment
+    collapsed_labels = labels  # HANS labels already binary (0 or 1)
+
+    acc = accuracy_score(collapsed_labels, collapsed_preds)
+    return {"accuracy": acc}
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -33,14 +49,14 @@ def load_amrs(file_path):
         amrs.append("\n".join(current_amr))
     return sents, amrs
 
-def binary_label(example):
-    return {
-        "premise": example["premise"],
-        "hypothesis": example["hypothesis"],
-        "label": 1 if example["label"] == 0 else 0  # 1 = entailment, 0 = non-entailment
-    }
+# def binary_label(example):
+#     return {
+#         "premise": example["premise"],
+#         "hypothesis": example["hypothesis"],
+#         "label": 1 if example["label"] == 0 else 0  # So that 1 = entailment, 0 = non-entailment
+#     }
 
-def prepare_mnli(split, n, use_amr):
+def prepare_mnli(split, m, use_amr):
     if split == "train":
         filename = "mnli_amr.txt"
     elif split == "dev":
@@ -50,13 +66,21 @@ def prepare_mnli(split, n, use_amr):
         assert False, "split must be 'train' or 'dev'"
 
     mnli = load_dataset("multi_nli")
-    mnli_binary = mnli[split].map(binary_label)
+    if m == 0:
+        mnli_split = mnli[split]
+    else:
+        mnli_split = mnli[split][:m]
     mnli_data = []
 
     if use_amr:
         mnli_sents, mnli_amrs = load_amrs(filename)
+        if m == 0:
+            pass
+        else:
+            mnli_sents = mnli_sents[:m]
+            mnli_amrs = mnli_amrs[:m]
 
-        n = len(mnli_sents) if not n else n
+        n = len(mnli_sents)
         for i in range(0, n, 2):
             premise_amr = mnli_amrs[i]
             hypothesis_amr = mnli_amrs[i+1]
@@ -67,16 +91,16 @@ def prepare_mnli(split, n, use_amr):
             if hypothesis == 'nan':
                 continue
             try:
-                _prem = mnli_binary[j]["premise"].strip()
+                _prem = mnli_split[j]["premise"].strip()
                 assert all([w in _prem.split(' ') for w in premise.split(' ') if '?' not in w])
             except:
-                print([premise, mnli_binary[j]["premise"].strip()])
+                print([premise, mnli_split[j]["premise"].strip()])
             try:
-                _hypo = mnli_binary[j]["hypothesis"].strip()
+                _hypo = mnli_split[j]["hypothesis"].strip()
                 assert all([w in _hypo.split(' ') for w in hypothesis.split(' ') if '?' not in w])
             except:
-                print([hypothesis, mnli_binary[j]["hypothesis"].strip()])
-            label = mnli_binary[j]["label"]
+                print([hypothesis, mnli_split[j]["hypothesis"].strip()])
+            label = mnli_split[j]["label"]
             mnli_data.append({
                 "premise": premise,
                 "hypothesis": hypothesis,
@@ -85,7 +109,7 @@ def prepare_mnli(split, n, use_amr):
                 "label": label,
             })
     else:
-        mnli_data = mnli_binary
+        mnli_data = mnli_split
     mnli_df = pd.DataFrame(mnli_data)
 
     return mnli_df
@@ -108,13 +132,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--use_amr", type=bool, default=False, help="Whether to use AMR")
-    parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
+    parser.add_argument("--debug", type=bool, default=True, help="Whether to use debug mode")
     args = parser.parse_args()
 
     if args.seed == 42:
         args.seed = random.randint(1, 10000)
 
-    print(args.seed)
+    print(args)
 
     if args.debug:
         n = 100
@@ -122,11 +146,12 @@ if __name__ == "__main__":
         n = 0
 
     mnli_train_df = prepare_mnli("train", n, use_amr=args.use_amr)
+    print(len(mnli_train_df))
     mnli_dev_df = prepare_mnli("dev", n, use_amr=args.use_amr)
 
     # === 3. Load HANS (evaluation) ===
     hans_df = pd.read_csv("hans-data.txt", sep="\t", names=["premise", "hypothesis", "label"])
-    label_map = {"entailment": 1, "non-entailment": 0}
+    label_map = {"entailment": 0, "non-entailment": 1}
     hans_df["label"] = hans_df["label"].map(label_map)
 
     if args.use_amr:
@@ -135,20 +160,19 @@ if __name__ == "__main__":
         hans_df["premise_amr"] = hans_df["premise"].map(sent_to_amr)
         hans_df["hypothesis_amr"] = hans_df["hypothesis"].map(sent_to_amr)
 
-    if args.use_amr:
         mnli_train_df["input_text"] = mnli_train_df.apply(
-            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            lambda row: flatten_amr("[CLS] " + row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
         mnli_dev_df["input_text"] = mnli_dev_df.apply(
-            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            lambda row: flatten_amr("[CLS] " + row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
         hans_df["input_text"] = hans_df.apply(
-            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            lambda row: flatten_amr("[CLS] " + row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
     else:
         mnli_train_df["input_text"] = mnli_train_df.apply(
-            lambda row: flatten_amr(row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
+            lambda row: flatten_amr("[CLS] " + row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
         mnli_dev_df["input_text"] = mnli_dev_df.apply(
-            lambda row: flatten_amr(row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
+            lambda row: flatten_amr("[CLS] " + row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
         hans_df["input_text"] = hans_df.apply(
-            lambda row: flatten_amr(row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
+            lambda row: flatten_amr("[CLS] " + row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
 
     # === 5. Tokenization ===
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
@@ -164,12 +188,13 @@ if __name__ == "__main__":
     hans_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
 
     # === 6. Train BERT ===
-    model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=2)
+    model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=3)
     model.resize_token_embeddings(len(tokenizer))
 
     training_args = TrainingArguments(
         output_dir="./results",
         eval_strategy="epoch",
+        save_strategy="epoch",
         eval_steps=500,
         save_steps=500,
         logging_steps=100,
@@ -184,7 +209,7 @@ if __name__ == "__main__":
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_steps=-1,  # full epochs
-        seed=42,
+        seed=args.seed,
         report_to="none",
         lr_scheduler_type="linear"
     )
@@ -201,5 +226,6 @@ if __name__ == "__main__":
     val_metrics = trainer.evaluate()
     print("Validation performance:", val_metrics)
 
+    trainer.compute_metrics = compute_binary_hans_metrics
     test_metrics = trainer.evaluate(hans_ds)
     print("Test performance:", test_metrics)
