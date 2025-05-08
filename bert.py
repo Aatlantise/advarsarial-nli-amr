@@ -32,29 +32,22 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 def load_amrs(file_path):
-    with open(file_path, encoding="utf-8") as f:
-        lines = f.readlines()
-
     sents, amrs = [], []
     current_amr = []
-    for line in lines:
-        if line.startswith("# ::snt"):
-            if current_amr:
-                amrs.append("\n".join(current_amr))
-                current_amr = []
-            sents.append(line.strip().split("# ::snt")[-1].strip())
-        elif line.strip():
-            current_amr.append(line.strip())
-    if current_amr:
-        amrs.append("\n".join(current_amr))
-    return sents, amrs
 
-# def binary_label(example):
-#     return {
-#         "premise": example["premise"],
-#         "hypothesis": example["hypothesis"],
-#         "label": 1 if example["label"] == 0 else 0  # So that 1 = entailment, 0 = non-entailment
-#     }
+    with open(file_path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("# ::snt"):
+                if current_amr:
+                    amrs.append("\n".join(current_amr))
+                    current_amr = []
+                sents.append(line.strip().split("# ::snt")[-1].strip())
+            elif line.strip():
+                current_amr.append(line.strip('\n'))
+        if current_amr:
+            amrs.append("\n".join(current_amr))
+        assert len(sents) == len(amrs)
+    return sents, amrs
 
 def prepare_mnli(split, m, use_amr):
     if split == "train":
@@ -118,13 +111,19 @@ def prepare_mnli(split, m, use_amr):
 
     return mnli_df
 
+def replace_spaces_with_tabs(text, tab_size=4, tab_token='[TAB]'):
+    def replacer(match):
+        num_spaces = len(match.group(0))
+        num_tabs = num_spaces // tab_size
+        return ' '.join([tab_token] * num_tabs)
+
+    return re.sub(r'(?: {' + str(tab_size) + r'})+', replacer, text)
+
+
 def flatten_amr(amr_str):
-    return re.sub(r"\s+", " <NLI> ", amr_str.strip()) if isinstance(amr_str, str) else ""
-
-
-def tokenize(example):
-    return tokenizer(example["input_text"], truncation=True, padding="max_length", max_length=256)
-
+    add_tabs = replace_spaces_with_tabs(amr_str)
+    add_newline = re.sub(r"[\n]+", " [NEW] ", add_tabs) if isinstance(add_tabs, str) else ""
+    return add_newline
 
 def compute_metrics(p):
     preds = torch.argmax(torch.tensor(p.predictions), axis=1)
@@ -132,12 +131,7 @@ def compute_metrics(p):
     acc = (preds == labels).float().mean().item()
     return {"accuracy": acc}
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--use_amr", type=bool, default=True, help="Whether to use AMR")
-    parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
-    args = parser.parse_args()
+def bert_train(args):
 
     if args.seed == 42:
         args.seed = random.randint(1, 10000)
@@ -155,6 +149,8 @@ if __name__ == "__main__":
 
     # === 3. Load HANS (evaluation) ===
     hans_df = pd.read_csv("hans-data.txt", sep="\t", names=["premise", "hypothesis", "label"])
+    if args.debug:
+        hans_df = hans_df[:n]
     label_map = {"entailment": 0, "non-entailment": 1}
     hans_df["label"] = hans_df["label"].map(label_map)
 
@@ -165,23 +161,26 @@ if __name__ == "__main__":
         hans_df["hypothesis_amr"] = hans_df["hypothesis"].map(sent_to_amr)
 
         mnli_train_df["input_text"] = mnli_train_df.apply(
-            lambda row: flatten_amr("[CLS] " + row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
         mnli_dev_df["input_text"] = mnli_dev_df.apply(
-            lambda row: flatten_amr("[CLS] " + row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
         hans_df["input_text"] = hans_df.apply(
-            lambda row: flatten_amr("[CLS] " + row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
     else:
         mnli_train_df["input_text"] = mnli_train_df.apply(
-            lambda row: flatten_amr("[CLS] " + row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
+            lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
         mnli_dev_df["input_text"] = mnli_dev_df.apply(
-            lambda row: flatten_amr("[CLS] " + row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
+            lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
         hans_df["input_text"] = hans_df.apply(
-            lambda row: flatten_amr("[CLS] " + row["premise"]) + " [SEP] " + flatten_amr(row["hypothesis"]), axis=1)
+            lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
 
     # === 5. Tokenization ===
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    additional_tokens = ["<NLI>"]
+    additional_tokens = ["[NEW]", "[TAB]"]
     tokenizer.add_tokens(additional_tokens)
+
+    def tokenize(example):
+        return tokenizer(example["input_text"], truncation=True, padding="max_length", max_length=256)
 
     train_ds = Dataset.from_pandas(mnli_train_df[["input_text", "label"]]).map(tokenize, batched=True)
     dev_ds = Dataset.from_pandas(mnli_dev_df[["input_text", "label"]]).map(tokenize, batched=True)
@@ -234,3 +233,13 @@ if __name__ == "__main__":
     trainer.compute_metrics = compute_binary_hans_metrics
     test_metrics = trainer.evaluate(hans_ds)
     print("Test performance:", test_metrics)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--use_amr", type=bool, default=True, help="Whether to use AMR")
+    parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
+    args = parser.parse_args()
+
+    bert_train(args)
+

@@ -13,6 +13,12 @@ pip install -r requirements.txt
 ```
 
 ## Experiment 1
+Run the following script to train a fine-tuned model on MNLI with AMR and evaluate on MNLI and HANS.
+```
+source env.sh
+python bert.py --use_amr=True 
+```
+
 
 ## Experiment 2
 Run the following script to perform zero-shot NLI predictions using OpenAI’s GPT models:

@@ -12,4 +12,4 @@
 
 source env.sh
 
-python bert.py --use_amr=True
+python bert.py --use_amr=False
