@@ -91,16 +91,16 @@ def prepare_mnli(split, m, use_amr):
             if hypothesis == 'nan':
                 continue
             try:
-                _prem = mnli_split[j]["premise"].strip()
+                _prem = mnli_split["premise"][j].strip()
                 assert all([w in _prem.split(' ') for w in premise.split(' ') if '?' not in w])
             except:
-                print([premise, mnli_split[j]["premise"].strip()])
+                print([premise, mnli_split["premise"][j].strip()])
             try:
-                _hypo = mnli_split[j]["hypothesis"].strip()
+                _hypo = mnli_split["hypothesis"][j].strip()
                 assert all([w in _hypo.split(' ') for w in hypothesis.split(' ') if '?' not in w])
             except:
-                print([hypothesis, mnli_split[j]["hypothesis"].strip()])
-            label = mnli_split[j]["label"]
+                print([hypothesis, mnli_split["hypothesis"][j].strip()])
+            label = mnli_split["label"][j]
             mnli_data.append({
                 "premise": premise,
                 "hypothesis": hypothesis,
@@ -109,7 +109,11 @@ def prepare_mnli(split, m, use_amr):
                 "label": label,
             })
     else:
-        mnli_data = mnli_split
+        mnli_data = [{
+                "premise": p,
+                "hypothesis": h,
+                "label": l,
+            } for p, h, l in zip(mnli_split["premise"], mnli_split["hypothesis"], mnli_split["label"])]
     mnli_df = pd.DataFrame(mnli_data)
 
     return mnli_df
@@ -131,8 +135,8 @@ def compute_metrics(p):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--use_amr", type=bool, default=False, help="Whether to use AMR")
-    parser.add_argument("--debug", type=bool, default=True, help="Whether to use debug mode")
+    parser.add_argument("--use_amr", type=bool, default=True, help="Whether to use AMR")
+    parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
     args = parser.parse_args()
 
     if args.seed == 42:
@@ -208,6 +212,7 @@ if __name__ == "__main__":
         num_train_epochs=3,
         weight_decay=0.01,
         warmup_ratio=0.1,
+        disable_tqdm=True,
         max_steps=-1,  # full epochs
         seed=args.seed,
         report_to="none",
