@@ -5,6 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu
+#SBATCH --cpus-per-task=4
 #SBATCH --time=12:00:00
 #SBATCH --mem=0
 #SBATCH --mail-user=jm3743@georgetown.edu

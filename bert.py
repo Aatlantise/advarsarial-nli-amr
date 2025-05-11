@@ -1,12 +1,15 @@
-import pandas as pd
 import re
-from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
-from datasets import Dataset, load_dataset
 import torch
 import random
-import numpy as np
 import argparse
+import pickle
+import os
+
+import pandas as pd
 import numpy as np
+
+from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
+from datasets import Dataset, load_dataset
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
@@ -118,11 +121,11 @@ def prepare_mnli(split, m, use_amr):
 
     return mnli_df
 
-def replace_spaces_with_tabs(text, tab_size=4, tab_token='[TAB]'):
+def replace_spaces_with_tabs(text, tab_size=6, tab_token='[TAB]'):
     def replacer(match):
         num_spaces = len(match.group(0))
         num_tabs = num_spaces // tab_size
-        return ' '.join([tab_token] * num_tabs)
+        return ' '.join([tab_token] * num_tabs) + ' '
 
     return re.sub(r'(?: {' + str(tab_size) + r'})+', replacer, text)
 
@@ -187,8 +190,18 @@ def get_datasets(args):
 def load_model(args):
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     if args.use_amr:
-        additional_tokens = ["[NEW]", "[TAB]"]
-        tokenizer.add_tokens(additional_tokens)
+        special_tokens_dict = {'additional_special_tokens': [
+            '[NEW]', '[TAB]',
+            ':arg0', ':arg1', ':arg2', ':arg3', ':arg4', ':arg5',
+            ':op1', ':op2', ':op3',
+            ':mod', ':location', ':time', ':name', ':value', ':topic',
+            '(', ')', '/', ':conj', ':and']
+        }
+        num_added_tokens = tokenizer.add_special_tokens(special_tokens_dict)
+
+    print(f"Added {num_added_tokens} tokens.")
+    print(tokenizer.convert_tokens_to_ids(['[NEW]', '[TAB]']))  # Should give real IDs
+
 
     model = BertForSequenceClassification.from_pretrained(args.model_name_or_path, num_labels=3)
     model.resize_token_embeddings(len(tokenizer))
@@ -205,7 +218,7 @@ def load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df):
         train_ds = None
     else:
         train_ds = Dataset.from_pandas(mnli_train_df[["input_text", "label"]], preserve_index=False)
-        train_ds = train_ds.map(tokenize, batched=True, num_proc=8)
+        train_ds = train_ds.map(tokenize, batched=True, num_proc=4)
 
     dev_ds = Dataset.from_pandas(mnli_dev_df[["input_text", "label"]]).map(tokenize, batched=True)
     hans_ds = Dataset.from_pandas(hans_df[["input_text", "label"]]).map(tokenize, batched=True)
@@ -224,7 +237,13 @@ def bert_train(args):
     if args.seed == 42:
         args.seed = random.randint(1, 10000)
 
-    mnli_train_df, mnli_dev_df, hans_df = get_datasets(args)
+    if "cache.pkl" in os.listdir():
+        with open("cache.pkl", "rb") as f:
+            mnli_train_df, mnli_dev_df, hans_df = pickle.load(f)
+    else:
+        mnli_train_df, mnli_dev_df, hans_df = get_datasets(args)
+        with open("cache.pkl", "wb") as g:
+            pickle.dump([mnli_train_df, mnli_dev_df, hans_df], g)
     train_ds, dev_ds, hans_ds, model = load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df)
 
     training_args = TrainingArguments(
