@@ -11,5 +11,6 @@
 #SBATCH --mail-type=END,FAIL
 
 source env.sh
-
-python bert.py --use_amr=True
+python bert.py --use_amr >> amr.log
+python bert.py --use_amr >> amr.log
+python bert.py --use_amr >> amr.log

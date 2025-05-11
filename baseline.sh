@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name="nli-amr-bert"
+#SBATCH --job-name="nli-bert"
 #SBATCH --output="%x.o%j"
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,5 +11,6 @@
 #SBATCH --mail-type=END,FAIL
 
 source env.sh
-
-python bert.py --use_amr=False
+python bert.py >> baseline.log
+python bert.py >> baseline.log
+python bert.py >> baseline.log

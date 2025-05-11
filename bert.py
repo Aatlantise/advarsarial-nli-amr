@@ -8,6 +8,7 @@ import numpy as np
 import argparse
 import numpy as np
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 def compute_binary_hans_metrics(eval_pred):
     logits, labels = eval_pred
@@ -16,7 +17,7 @@ def compute_binary_hans_metrics(eval_pred):
     # Collapse 3-class predictions into 2-class
     # Entailment (label 0) → 1
     # Neutral (1) or Contradiction (2) → 0
-    collapsed_preds = np.where(preds == 0, 1, 1)  # 0 = entailment, 1 = non-entailment
+    collapsed_preds = np.where(preds == 0, 0, 1)
     collapsed_labels = labels  # HANS labels already binary (0 or 1)
 
     acc = accuracy_score(collapsed_labels, collapsed_preds)
@@ -74,33 +75,39 @@ def prepare_mnli(split, m, use_amr):
             mnli_amrs = mnli_amrs[:m]
 
         n = len(mnli_sents)
-        for i in range(0, n, 2):
-            premise_amr = mnli_amrs[i]
-            hypothesis_amr = mnli_amrs[i+1]
-             # You should replace this with real labels if you have them!
-            j = int(i/2)
-            premise = mnli_sents[i]
+
+        # Extract once outside loop
+        premises_text = mnli_split["premise"]
+        hypotheses_text = mnli_split["hypothesis"]
+        labels = mnli_split["label"]
+
+        # Optional: if you're using HuggingFace Dataset, convert to list first
+        # premises_text = mnli_split["premise"]
+        # etc.
+
+        for j in tqdm(range(n // 2)):
+            i = j * 2
             hypothesis = mnli_sents[i + 1]
+            premise = mnli_sents[i]
+
+            hypothesis_from_file = hypotheses_text[j]
+            premise_from_file = premises_text[j]
+            label_from_file = labels[j]
+
             if hypothesis == 'nan':
                 continue
-            try:
-                _prem = mnli_split["premise"][j].strip()
-                assert all([w in _prem.split(' ') for w in premise.split(' ') if '?' not in w])
-            except:
-                print([premise, mnli_split["premise"][j].strip()])
-            try:
-                _hypo = mnli_split["hypothesis"][j].strip()
-                assert all([w in _hypo.split(' ') for w in hypothesis.split(' ') if '?' not in w])
-            except:
-                print([hypothesis, mnli_split["hypothesis"][j].strip()])
-            label = mnli_split["label"][j]
+
+            assert all([w in premise_from_file.split(' ') for w in premise.split(' ') if '?' not in w])
+            assert all([w in hypothesis_from_file.split(' ') for w in hypothesis.split(' ') if '?' not in w])
+
             mnli_data.append({
-                "premise": premise,
-                "hypothesis": hypothesis,
-                "premise_amr": premise_amr,
-                "hypothesis_amr": hypothesis_amr,
-                "label": label,
+                "premise": hypothesis_from_file,
+                "hypothesis": premise_from_file,
+                "premise_amr": mnli_amrs[i],
+                "hypothesis_amr": mnli_amrs[i + 1],
+                "label": label_from_file,
             })
+
     else:
         mnli_data = [{
                 "premise": p,
@@ -131,23 +138,18 @@ def compute_metrics(p):
     acc = (preds == labels).float().mean().item()
     return {"accuracy": acc}
 
-def bert_train(args):
-
-    if args.seed == 42:
-        args.seed = random.randint(1, 10000)
-
-    print(args)
-
+def get_datasets(args):
     if args.debug:
         n = 100
     else:
         n = 0
 
-    mnli_train_df = prepare_mnli("train", n, use_amr=args.use_amr)
-    print(len(mnli_train_df))
+    if args.eval_only:
+        mnli_train_df = None
+    else:
+        mnli_train_df = prepare_mnli("train", n, use_amr=args.use_amr)
     mnli_dev_df = prepare_mnli("dev", n, use_amr=args.use_amr)
 
-    # === 3. Load HANS (evaluation) ===
     hans_df = pd.read_csv("hans-data.txt", sep="\t", names=["premise", "hypothesis", "label"])
     if args.debug:
         hans_df = hans_df[:n]
@@ -160,39 +162,70 @@ def bert_train(args):
         hans_df["premise_amr"] = hans_df["premise"].map(sent_to_amr)
         hans_df["hypothesis_amr"] = hans_df["hypothesis"].map(sent_to_amr)
 
-        mnli_train_df["input_text"] = mnli_train_df.apply(
-            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+        if args.eval_only:
+            pass
+        else:
+            mnli_train_df["input_text"] = mnli_train_df.apply(
+                lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
         mnli_dev_df["input_text"] = mnli_dev_df.apply(
             lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
         hans_df["input_text"] = hans_df.apply(
             lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
     else:
-        mnli_train_df["input_text"] = mnli_train_df.apply(
-            lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
+        if args.eval_only:
+            pass
+        else:
+            mnli_train_df["input_text"] = mnli_train_df.apply(
+                lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
         mnli_dev_df["input_text"] = mnli_dev_df.apply(
             lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
         hans_df["input_text"] = hans_df.apply(
             lambda row: row["premise"] + " [SEP] " + row["hypothesis"], axis=1)
 
-    # === 5. Tokenization ===
+    return mnli_train_df, mnli_dev_df, hans_df
+
+def load_model(args):
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    additional_tokens = ["[NEW]", "[TAB]"]
-    tokenizer.add_tokens(additional_tokens)
+    if args.use_amr:
+        additional_tokens = ["[NEW]", "[TAB]"]
+        tokenizer.add_tokens(additional_tokens)
+
+    model = BertForSequenceClassification.from_pretrained(args.model_name_or_path, num_labels=3)
+    model.resize_token_embeddings(len(tokenizer))
+
+    return model, tokenizer
+
+def load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df):
+    model, tokenizer = load_model(args)
 
     def tokenize(example):
         return tokenizer(example["input_text"], truncation=True, padding="max_length", max_length=256)
 
-    train_ds = Dataset.from_pandas(mnli_train_df[["input_text", "label"]]).map(tokenize, batched=True)
+    if args.eval_only:
+        train_ds = None
+    else:
+        train_ds = Dataset.from_pandas(mnli_train_df[["input_text", "label"]], preserve_index=False)
+        train_ds = train_ds.map(tokenize, batched=True, num_proc=8)
+
     dev_ds = Dataset.from_pandas(mnli_dev_df[["input_text", "label"]]).map(tokenize, batched=True)
     hans_ds = Dataset.from_pandas(hans_df[["input_text", "label"]]).map(tokenize, batched=True)
 
-    train_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+    if args.eval_only:
+        train_ds = None
+    else:
+        train_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
     dev_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
     hans_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
 
-    # === 6. Train BERT ===
-    model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=3)
-    model.resize_token_embeddings(len(tokenizer))
+    return train_ds, dev_ds, hans_ds, model
+
+def bert_train(args):
+
+    if args.seed == 42:
+        args.seed = random.randint(1, 10000)
+
+    mnli_train_df, mnli_dev_df, hans_df = get_datasets(args)
+    train_ds, dev_ds, hans_ds, model = load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df)
 
     training_args = TrainingArguments(
         output_dir="./results",
@@ -200,20 +233,20 @@ def bert_train(args):
         save_strategy="epoch",
         eval_steps=500,
         save_steps=500,
-        logging_steps=100,
         save_total_limit=2,
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
         learning_rate=2e-5,
-        per_device_train_batch_size=32,
+        per_device_train_batch_size=64,
         per_device_eval_batch_size=64,
         num_train_epochs=3,
         weight_decay=0.01,
         warmup_ratio=0.1,
-        disable_tqdm=True,
+        disable_tqdm=not args.tqdm,
         max_steps=-1,  # full epochs
         seed=args.seed,
+        logging_dir="./logs",
         report_to="none",
         lr_scheduler_type="linear"
     )
@@ -226,7 +259,8 @@ def bert_train(args):
         compute_metrics=compute_metrics,
     )
 
-    trainer.train()
+    if not args.eval_only:
+        trainer.train()
     val_metrics = trainer.evaluate()
     print("Validation performance:", val_metrics)
 
@@ -237,9 +271,13 @@ def bert_train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--use_amr", type=bool, default=True, help="Whether to use AMR")
+    parser.add_argument("--use_amr", type=bool, default=False, help="Whether to use AMR")
     parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
+    parser.add_argument("--tqdm", type=bool, default=True, help="Whether to use debug mode")
+    parser.add_argument("--model_name_or_path", type=str, default="bert-base-uncased", help="Name of model of path to its directory")
+    parser.add_argument("--eval_only", type=bool, default=False, help="Does not train model if false")
     args = parser.parse_args()
 
+    print(args)
     bert_train(args)
 
