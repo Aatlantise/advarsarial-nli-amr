@@ -168,12 +168,28 @@ def get_datasets(args):
         if args.eval_only:
             pass
         else:
-            mnli_train_df["input_text"] = mnli_train_df.apply(
-                lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
-        mnli_dev_df["input_text"] = mnli_dev_df.apply(
-            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
-        hans_df["input_text"] = hans_df.apply(
-            lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            if args.amr_only:
+                mnli_train_df["input_text"] = mnli_train_df.apply(
+                    lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " +
+                                flatten_amr(row["hypothesis_amr"]), axis=1)
+            else:
+                mnli_train_df["input_text"] = mnli_train_df.apply(
+                    lambda row: row["premise"].strip() + " " + flatten_amr(row["premise_amr"]) + " [SEP] " +
+                                row["hypothesis"].strip() + " " + flatten_amr(row["hypothesis_amr"]), axis=1)
+        if args.amr_only:
+            mnli_dev_df["input_text"] = mnli_dev_df.apply(
+                lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " +
+                            flatten_amr(row["hypothesis_amr"]), axis=1)
+            hans_df["input_text"] = hans_df.apply(
+                lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " +
+                            flatten_amr(row["hypothesis_amr"]), axis=1)
+        else:
+            mnli_dev_df["input_text"] = mnli_dev_df.apply(
+                lambda row: row["premise"].strip() + " " + flatten_amr(row["premise_amr"]) + " [SEP] " +
+                                row["hypothesis"].strip() + " " + flatten_amr(row["hypothesis_amr"]), axis=1)
+            hans_df["input_text"] = hans_df.apply(
+                lambda row: row["premise"].replace(" .", ".") + " " + flatten_amr(row["premise_amr"]) + " [SEP] " +
+                                row["hypothesis"].replace(" .", ".") + " " + + flatten_amr(row["hypothesis_amr"]), axis=1)
     else:
         if args.eval_only:
             pass
@@ -188,9 +204,10 @@ def get_datasets(args):
     return mnli_train_df, mnli_dev_df, hans_df
 
 def load_model(args):
-    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    tokenizer = BertTokenizer.from_pretrained(args.model_name_or_path)
     if args.use_amr:
         special_tokens_dict = {'additional_special_tokens': [
+            '[TXT]', '[AMR]',
             '[NEW]', '[TAB]',
             ':arg0', ':arg1', ':arg2', ':arg3', ':arg4', ':arg5',
             ':op1', ':op2', ':op3',
@@ -199,7 +216,7 @@ def load_model(args):
         }
         num_added_tokens = tokenizer.add_special_tokens(special_tokens_dict)
 
-    print(f"Added {num_added_tokens} tokens.")
+        print(f"Added {num_added_tokens} tokens.")
     print(tokenizer.convert_tokens_to_ids(['[NEW]', '[TAB]']))  # Should give real IDs
 
 
@@ -237,29 +254,40 @@ def bert_train(args):
     if args.seed == 42:
         args.seed = random.randint(1, 10000)
 
-    if "cache.pkl" in os.listdir():
-        with open("cache.pkl", "rb") as f:
+    if args.use_amr:
+        if args.amr_only:
+            cache_name = "amr_cache.pkl"
+        else:
+            cache_name = "amr_text_cache.pkl"
+    else:
+        cache_name = "baseline_cache.pkl"
+    if cache_name in os.listdir():
+        with open(cache_name, "rb") as f:
             mnli_train_df, mnli_dev_df, hans_df = pickle.load(f)
     else:
         mnli_train_df, mnli_dev_df, hans_df = get_datasets(args)
-        with open("cache.pkl", "wb") as g:
+        with open(cache_name, "wb") as g:
             pickle.dump([mnli_train_df, mnli_dev_df, hans_df], g)
     train_ds, dev_ds, hans_ds, model = load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df)
 
+    batch_size = 32
+    if 'large' in args.model_name_or_path:
+        batch_size = 32
+    elif 'base' in args.model_name_or_path:
+        batch_size = 64
+
+
     training_args = TrainingArguments(
-        output_dir="./results",
+        output_dir=f"./results-{args.use_amr}-{args.seed}",
         eval_strategy="epoch",
         save_strategy="epoch",
-        eval_steps=500,
-        save_steps=500,
         save_total_limit=2,
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
         learning_rate=2e-5,
-        per_device_train_batch_size=64,
-        per_device_eval_batch_size=64,
-        num_train_epochs=3,
+        per_device_train_batch_size=batch_size,
+        num_train_epochs=batch_size,
         weight_decay=0.01,
         warmup_ratio=0.1,
         disable_tqdm=not args.tqdm,
@@ -290,11 +318,12 @@ def bert_train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--use_amr", type=bool, default=False, help="Whether to use AMR")
+    parser.add_argument("--use_amr", type=bool, default=True, help="Whether to use AMR")
     parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
     parser.add_argument("--tqdm", type=bool, default=True, help="Whether to use debug mode")
     parser.add_argument("--model_name_or_path", type=str, default="bert-base-uncased", help="Name of model of path to its directory")
     parser.add_argument("--eval_only", type=bool, default=False, help="Does not train model if false")
+    parser.add_argument("--amr_only", type=bool, default=False, help="AMR only if false, AMR with text if True")
     args = parser.parse_args()
 
     print(args)
