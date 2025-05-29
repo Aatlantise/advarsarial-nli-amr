@@ -18,13 +18,13 @@ def compute_binary_hans_metrics(eval_pred):
     preds = np.argmax(logits, axis=1)
 
     # Collapse 3-class predictions into 2-class
-    # Entailment (label 0) → 1
-    # Neutral (1) or Contradiction (2) → 0
+    # Entailment (label 0) → 0
+    # Neutral (1) or Contradiction (2) → 1
     collapsed_preds = np.where(preds == 0, 0, 1)
     collapsed_labels = labels  # HANS labels already binary (0 or 1)
 
     acc = accuracy_score(collapsed_labels, collapsed_preds)
-    return {"accuracy": acc}
+    return collapsed_preds, collapsed_labels, acc
 
 
 def set_seed(seed):
@@ -249,10 +249,18 @@ def load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df):
 
     return train_ds, dev_ds, hans_ds, model
 
-def bert_train(args):
+def load_data_from_pickle(cache_name):
+    if cache_name in os.listdir():
+        with open(cache_name, "rb") as f:
+            mnli_train_df, mnli_dev_df, hans_df = pickle.load(f)
+    else:
+        mnli_train_df, mnli_dev_df, hans_df = get_datasets(args)
+        with open(cache_name, "wb") as g:
+            pickle.dump([mnli_train_df, mnli_dev_df, hans_df], g)
 
-    if args.seed == 42:
-        args.seed = random.randint(1, 10000)
+    return mnli_train_df, mnli_dev_df, hans_df
+
+def bert_train(args):
 
     if args.use_amr:
         if args.amr_only:
@@ -261,13 +269,9 @@ def bert_train(args):
             cache_name = "amr_text_cache.pkl"
     else:
         cache_name = "baseline_cache.pkl"
-    if cache_name in os.listdir():
-        with open(cache_name, "rb") as f:
-            mnli_train_df, mnli_dev_df, hans_df = pickle.load(f)
-    else:
-        mnli_train_df, mnli_dev_df, hans_df = get_datasets(args)
-        with open(cache_name, "wb") as g:
-            pickle.dump([mnli_train_df, mnli_dev_df, hans_df], g)
+
+    mnli_train_df, mnli_dev_df, hans_df = load_data_from_pickle(cache_name)
+
     train_ds, dev_ds, hans_ds, model = load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df)
 
     batch_size = 32
@@ -278,7 +282,7 @@ def bert_train(args):
 
 
     training_args = TrainingArguments(
-        output_dir=f"./results-{args.use_amr}-{args.seed}",
+        output_dir=f"./results/{args.desc}-{args.seed}",
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=2,
@@ -287,7 +291,8 @@ def bert_train(args):
         greater_is_better=True,
         learning_rate=2e-5,
         per_device_train_batch_size=batch_size,
-        num_train_epochs=batch_size,
+        per_device_eval_batch_size=batch_size,
+        num_train_epochs=3,
         weight_decay=0.01,
         warmup_ratio=0.1,
         disable_tqdm=not args.tqdm,
@@ -312,8 +317,21 @@ def bert_train(args):
     print("Validation performance:", val_metrics)
 
     trainer.compute_metrics = compute_binary_hans_metrics
-    test_metrics = trainer.evaluate(hans_ds)
+    preds, labels, test_metrics = trainer.evaluate(hans_ds)
     print("Test performance:", test_metrics)
+
+    if args.use_amr:
+        args.desc = "amr"
+        if args.amr_only:
+            args.desc += "-only"
+        else:
+            args.desc += "-with-text"
+    else:
+        args.desc = "baseline"
+
+    with open(f"results/{args.desc}-{args.seed}.tsv", "w") as f:
+        for prem, hyp, pred, label in zip(list(hans_ds["premise"]), list(hans_ds["hypothesis"]), preds, labels):
+            f.write('\t'.join([prem, hyp, pred, label]) + "\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
