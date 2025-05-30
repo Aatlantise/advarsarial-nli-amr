@@ -12,6 +12,6 @@
 #SBATCH --mail-type=END,FAIL
 
 source env.sh
-python bert.py --use_amr True --amr_only True --seed 1 >> amr-only-1.log
-python bert.py --use_amr True --amr_only True --seed 2 >> amr-only-2.log
-python bert.py --use_amr True --amr_only True --seed 3 >> amr-only-3.log
+python bert.py --use_amr True --amr_only True --seed 1 >> logs/amr-only-1.log
+python bert.py --use_amr True --amr_only True --seed 2 >> logs/amr-only-2.log
+python bert.py --use_amr True --amr_only True --seed 3 >> logs/amr-only-3.log

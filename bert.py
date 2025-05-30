@@ -10,7 +10,7 @@ import numpy as np
 
 from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset, load_dataset
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, confusion_matrix
 from tqdm import tqdm
 
 def compute_binary_hans_metrics(eval_pred):
@@ -24,7 +24,9 @@ def compute_binary_hans_metrics(eval_pred):
     collapsed_labels = labels  # HANS labels already binary (0 or 1)
 
     acc = accuracy_score(collapsed_labels, collapsed_preds)
-    return collapsed_preds, collapsed_labels, acc
+    cm = confusion_matrix(collapsed_labels, collapsed_preds, labels=["Entailment", "Non-entailment"])
+
+    return collapsed_preds, collapsed_labels, acc, cm.tolist()
 
 
 def set_seed(seed):
@@ -130,8 +132,11 @@ def replace_spaces_with_tabs(text, tab_size=6, tab_token='[TAB]'):
     return re.sub(r'(?: {' + str(tab_size) + r'})+', replacer, text)
 
 
-def flatten_amr(amr_str):
-    add_tabs = replace_spaces_with_tabs(amr_str)
+def flatten_amr(args, amr_str):
+    if args.retain_space:
+        add_tabs = replace_spaces_with_tabs(amr_str)
+    else:
+        add_tabs = amr_str
     add_newline = re.sub(r"[\n]+", " [NEW] ", add_tabs) if isinstance(add_tabs, str) else ""
     return add_newline
 
@@ -170,26 +175,26 @@ def get_datasets(args):
         else:
             if args.amr_only:
                 mnli_train_df["input_text"] = mnli_train_df.apply(
-                    lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " +
-                                flatten_amr(row["hypothesis_amr"]), axis=1)
+                    lambda row: flatten_amr(args, row["premise_amr"]) + " [SEP] " +
+                                flatten_amr(args, row["hypothesis_amr"]), axis=1)
             else:
                 mnli_train_df["input_text"] = mnli_train_df.apply(
-                    lambda row: row["premise"].strip() + " " + flatten_amr(row["premise_amr"]) + " [SEP] " +
-                                row["hypothesis"].strip() + " " + flatten_amr(row["hypothesis_amr"]), axis=1)
+                    lambda row: row["premise"].strip() + " " + flatten_amr(args, row["premise_amr"]) + " [SEP] " +
+                                row["hypothesis"].strip() + " " + flatten_amr(args, row["hypothesis_amr"]), axis=1)
         if args.amr_only:
             mnli_dev_df["input_text"] = mnli_dev_df.apply(
-                lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " +
-                            flatten_amr(row["hypothesis_amr"]), axis=1)
+                lambda row: flatten_amr(args, row["premise_amr"]) + " [SEP] " +
+                            flatten_amr(args, row["hypothesis_amr"]), axis=1)
             hans_df["input_text"] = hans_df.apply(
-                lambda row: flatten_amr(row["premise_amr"]) + " [SEP] " +
-                            flatten_amr(row["hypothesis_amr"]), axis=1)
+                lambda row: flatten_amr(args, row["premise_amr"]) + " [SEP] " +
+                            flatten_amr(args, row["hypothesis_amr"]), axis=1)
         else:
             mnli_dev_df["input_text"] = mnli_dev_df.apply(
-                lambda row: row["premise"].strip() + " " + flatten_amr(row["premise_amr"]) + " [SEP] " +
-                                row["hypothesis"].strip() + " " + flatten_amr(row["hypothesis_amr"]), axis=1)
+                lambda row: row["premise"].strip() + " " + flatten_amr(args, row["premise_amr"]) + " [SEP] " +
+                                row["hypothesis"].strip() + " " + flatten_amr(args, row["hypothesis_amr"]), axis=1)
             hans_df["input_text"] = hans_df.apply(
-                lambda row: row["premise"].replace(" .", ".") + " " + flatten_amr(row["premise_amr"]) + " [SEP] " +
-                                row["hypothesis"].replace(" .", ".") + " " + + flatten_amr(row["hypothesis_amr"]), axis=1)
+                lambda row: row["premise"].replace(" .", ".") + " " + flatten_amr(args, row["premise_amr"]) + " [SEP] " +
+                                row["hypothesis"].replace(" .", ".") + " " + flatten_amr(args, row["hypothesis_amr"]), axis=1)
     else:
         if args.eval_only:
             pass
@@ -317,17 +322,9 @@ def bert_train(args):
     print("Validation performance:", val_metrics)
 
     trainer.compute_metrics = compute_binary_hans_metrics
-    preds, labels, test_metrics = trainer.evaluate(hans_ds)
+    preds, labels, test_metrics, conf_mat = trainer.evaluate(hans_ds)
     print("Test performance:", test_metrics)
-
-    if args.use_amr:
-        args.desc = "amr"
-        if args.amr_only:
-            args.desc += "-only"
-        else:
-            args.desc += "-with-text"
-    else:
-        args.desc = "baseline"
+    print("Confusion Matrix:\n", conf_mat)
 
     with open(f"results/{args.desc}-{args.seed}.tsv", "w") as f:
         for prem, hyp, pred, label in zip(list(hans_ds["premise"]), list(hans_ds["hypothesis"]), preds, labels):
@@ -342,7 +339,17 @@ if __name__ == "__main__":
     parser.add_argument("--model_name_or_path", type=str, default="bert-base-uncased", help="Name of model of path to its directory")
     parser.add_argument("--eval_only", type=bool, default=False, help="Does not train model if false")
     parser.add_argument("--amr_only", type=bool, default=False, help="AMR only if false, AMR with text if True")
+    parser.add_argument("--retain_space", type=bool, default=True, help="Use [TAB] character to represent whitespace if True")
     args = parser.parse_args()
+
+    if args.use_amr:
+        args.desc = "amr"
+        if args.amr_only:
+            args.desc += "-only"
+        else:
+            args.desc += "-with-text"
+    else:
+        args.desc = "baseline"
 
     print(args)
     bert_train(args)
