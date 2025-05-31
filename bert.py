@@ -227,8 +227,6 @@ def load_model(args):
         num_added_tokens = tokenizer.add_special_tokens(special_tokens_dict)
 
         print(f"Added {num_added_tokens} tokens.")
-    print(tokenizer.convert_tokens_to_ids(['[NEW]', '[TAB]']))  # Should give real IDs
-
 
     model = BertForSequenceClassification.from_pretrained(args.model_name_or_path, num_labels=3)
     model.resize_token_embeddings(len(tokenizer))
@@ -343,9 +341,9 @@ def bert_train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--use_amr", type=bool, default=True, help="Whether to use AMR")
+    parser.add_argument("--use_amr", type=bool, default=False, help="Whether to use AMR")
     parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
-    parser.add_argument("--tqdm", type=bool, default=True, help="Whether to use debug mode")
+    parser.add_argument("--tqdm", type=bool, default=False, help="Whether to use debug mode")
     parser.add_argument("--model_name_or_path", type=str, default="bert-base-uncased", help="Name of model of path to its directory")
     parser.add_argument("--tokenizer", type=str, default="bert-base-uncased", help="Name of tokenizer")
     parser.add_argument("--eval_only", type=bool, default=False, help="Does not train model if false")
