@@ -24,9 +24,14 @@ def compute_binary_hans_metrics(eval_pred):
     collapsed_labels = labels  # HANS labels already binary (0 or 1)
 
     acc = accuracy_score(collapsed_labels, collapsed_preds)
-    cm = confusion_matrix(collapsed_labels, collapsed_preds, labels=["Entailment", "Non-entailment"])
+    cm = confusion_matrix(collapsed_labels, collapsed_preds, labels=[0, 1])
 
-    return collapsed_preds, collapsed_labels, acc, cm.tolist()
+    return {
+        "preds": collapsed_preds,
+        "labels": collapsed_labels,
+        "accuracy": acc,
+        "confusion_matrix": cm.tolist()
+    }
 
 
 def set_seed(seed):
@@ -209,7 +214,7 @@ def get_datasets(args):
     return mnli_train_df, mnli_dev_df, hans_df
 
 def load_model(args):
-    tokenizer = BertTokenizer.from_pretrained(args.model_name_or_path)
+    tokenizer = BertTokenizer.from_pretrained(args.tokenizer)
     if args.use_amr:
         special_tokens_dict = {'additional_special_tokens': [
             '[TXT]', '[AMR]',
@@ -256,6 +261,7 @@ def load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df):
 
 def load_data_from_pickle(cache_name):
     if cache_name in os.listdir():
+        print(f"Loading data from cache: {cache_name}")
         with open(cache_name, "rb") as f:
             mnli_train_df, mnli_dev_df, hans_df = pickle.load(f)
     else:
@@ -322,7 +328,11 @@ def bert_train(args):
     print("Validation performance:", val_metrics)
 
     trainer.compute_metrics = compute_binary_hans_metrics
-    preds, labels, test_metrics, conf_mat = trainer.evaluate(hans_ds)
+    results = trainer.evaluate(hans_ds)
+    test_metrics = results["eval_accuracy"]
+    preds = results["eval_preds"]
+    labels = results["eval_labels"]
+    conf_mat = results["confusion_matrix"]
     print("Test performance:", test_metrics)
     print("Confusion Matrix:\n", conf_mat)
 
@@ -337,6 +347,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", type=bool, default=False, help="Whether to use debug mode")
     parser.add_argument("--tqdm", type=bool, default=True, help="Whether to use debug mode")
     parser.add_argument("--model_name_or_path", type=str, default="bert-base-uncased", help="Name of model of path to its directory")
+    parser.add_argument("--tokenizer", type=str, default="bert-base-uncased", help="Name of tokenizer")
     parser.add_argument("--eval_only", type=bool, default=False, help="Does not train model if false")
     parser.add_argument("--amr_only", type=bool, default=False, help="AMR only if false, AMR with text if True")
     parser.add_argument("--retain_space", type=bool, default=True, help="Use [TAB] character to represent whitespace if True")
