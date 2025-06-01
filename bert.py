@@ -140,10 +140,11 @@ def replace_spaces_with_tabs(text, tab_size=6, tab_token='[TAB]'):
 def flatten_amr(args, amr_str):
     if args.retain_space:
         add_tabs = replace_spaces_with_tabs(amr_str)
+        add_newline = re.sub(r"[\n]+", " [NEW] ", add_tabs) if isinstance(add_tabs, str) else ""
+        flattened_amr = add_newline
     else:
-        add_tabs = amr_str
-    add_newline = re.sub(r"[\n]+", " [NEW] ", add_tabs) if isinstance(add_tabs, str) else ""
-    return add_newline
+        flattened_amr = re.sub(r"[\s]+", " ", amr_str) if isinstance(amr_str, str) else ""
+    return flattened_amr
 
 def compute_metrics(p):
     preds = torch.argmax(torch.tensor(p.predictions), axis=1)
@@ -257,7 +258,9 @@ def load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df):
 
     return train_ds, dev_ds, hans_ds, model
 
-def load_data_from_pickle(cache_name):
+def load_data_from_pickle(args):
+    cache_name = args.desc + ".pkl"
+
     if cache_name in os.listdir():
         print(f"Loading data from cache: {cache_name}")
         with open(cache_name, "rb") as f:
@@ -271,15 +274,7 @@ def load_data_from_pickle(cache_name):
 
 def bert_train(args):
 
-    if args.use_amr:
-        if args.amr_only:
-            cache_name = "amr_cache.pkl"
-        else:
-            cache_name = "amr_text_cache.pkl"
-    else:
-        cache_name = "baseline_cache.pkl"
-
-    mnli_train_df, mnli_dev_df, hans_df = load_data_from_pickle(cache_name)
+    mnli_train_df, mnli_dev_df, hans_df = load_data_from_pickle(args)
 
     train_ds, dev_ds, hans_ds, model = load_model_and_data(args, mnli_train_df, mnli_dev_df, hans_df)
 
@@ -301,7 +296,7 @@ def bert_train(args):
         learning_rate=2e-5,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
-        num_train_epochs=3,
+        num_train_epochs=10 if args.long else 3,
         weight_decay=0.01,
         warmup_ratio=0.1,
         disable_tqdm=not args.tqdm,
@@ -330,7 +325,7 @@ def bert_train(args):
     test_metrics = results["eval_accuracy"]
     preds = results["eval_preds"]
     labels = results["eval_labels"]
-    conf_mat = results["confusion_matrix"]
+    conf_mat = results["eval_confusion_matrix"]
     print("Test performance:", test_metrics)
     print("Confusion Matrix:\n", conf_mat)
 
@@ -348,7 +343,8 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer", type=str, default="bert-base-uncased", help="Name of tokenizer")
     parser.add_argument("--eval_only", type=bool, default=False, help="Does not train model if false")
     parser.add_argument("--amr_only", type=bool, default=False, help="AMR only if false, AMR with text if True")
-    parser.add_argument("--retain_space", type=bool, default=True, help="Use [TAB] character to represent whitespace if True")
+    parser.add_argument("--retain_space", type=bool, default=False, help="Use [TAB] character to represent whitespace if True")
+    parser.add_argument("--long", type=bool, default=False, help="10 epochs if True, 3 if False")
     args = parser.parse_args()
 
     if args.use_amr:
@@ -357,6 +353,10 @@ if __name__ == "__main__":
             args.desc += "-only"
         else:
             args.desc += "-with-text"
+        if args.retain_space:
+            args.desc += "-spaced"
+        else:
+            args.desc += "-nospace"
     else:
         args.desc = "baseline"
 

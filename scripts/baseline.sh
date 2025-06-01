@@ -13,6 +13,4 @@
 #SBATCH --mail-type=END,FAIL
 
 source env.sh
-python bert.py --seed 1 >> logs/baseline_1.log
-python bert.py --seed 2 >> logs/baseline_2.log
-python bert.py --seed 3 >> logs/baseline_3.log
+python bert.py --seed 1 --long >> logs/baseline-1-long.log
