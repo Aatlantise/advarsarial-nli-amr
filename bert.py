@@ -290,7 +290,7 @@ def bert_train(args):
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=2,
-        load_best_model_at_end=True,
+        load_best_model_at_end=False,
         metric_for_best_model="accuracy",
         greater_is_better=True,
         learning_rate=2e-5,
@@ -330,7 +330,7 @@ def bert_train(args):
     print("Confusion Matrix:\n", conf_mat)
 
     with open(f"results/{args.desc}-{args.seed}.tsv", "w") as f:
-        for prem, hyp, pred, label in zip(list(hans_ds["premise"]), list(hans_ds["hypothesis"]), preds, labels):
+        for prem, hyp, pred, label in zip(list(hans_ds["input_text"]), preds, labels):
             f.write('\t'.join([prem, hyp, pred, label]) + "\n")
 
 if __name__ == "__main__":

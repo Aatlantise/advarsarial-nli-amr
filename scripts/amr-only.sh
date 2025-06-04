@@ -12,6 +12,4 @@
 #SBATCH --mail-type=END,FAIL
 
 source env.sh
-python bert.py --use_amr True --amr_only True --seed 1 >> logs/amr-only-nospace-1.log
-python bert.py --use_amr True --amr_only True --seed 2 >> logs/amr-only-nospace-2.log
-python bert.py --use_amr True --amr_only True --seed 3 >> logs/amr-only-nospace-3.log
+python bert.py --use_amr True --amr_only True --long True --seed 5 >> logs/amr-only-nospace-5-long.log
