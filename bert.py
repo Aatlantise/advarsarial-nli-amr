@@ -330,8 +330,8 @@ def bert_train(args):
     print("Confusion Matrix:\n", conf_mat)
 
     with open(f"results/{args.desc}-{args.seed}.tsv", "w") as f:
-        for prem, hyp, pred, label in zip(list(hans_ds["input_text"]), preds, labels):
-            f.write('\t'.join([prem, hyp, pred, label]) + "\n")
+        for inp, pred, label in zip(list(hans_ds["input_text"]), preds, labels):
+            f.write('\t'.join([inp, pred, label]) + "\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
