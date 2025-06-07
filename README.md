@@ -15,7 +15,6 @@ pip install -r requirements.txt
 ## Experiment 1
 Run the following script to train a fine-tuned model on MNLI with AMR and evaluate on MNLI and HANS.
 ```
-source env.sh
 python bert.py --use_amr=True 
 ```
 

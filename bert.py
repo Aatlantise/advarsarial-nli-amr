@@ -220,9 +220,9 @@ def load_model(args):
         special_tokens_dict = {'additional_special_tokens': [
             '[TXT]', '[AMR]',
             '[NEW]', '[TAB]',
-            ':arg0', ':arg1', ':arg2', ':arg3', ':arg4', ':arg5',
+            ':ARG0', ':ARG1', ':ARG2', ':ARG3', ':ARG4', ':ARG5',
             ':op1', ':op2', ':op3',
-            ':mod', ':location', ':time', ':name', ':value', ':topic',
+            ':mod', ':location', ':time', ':name', ':value', ':topic', ':poss'
             '(', ')', '/', ':conj', ':and']
         }
         num_added_tokens = tokenizer.add_special_tokens(special_tokens_dict)
@@ -331,7 +331,7 @@ def bert_train(args):
 
     with open(f"results/{args.desc}-{args.seed}.tsv", "w") as f:
         for inp, pred, label in zip(list(hans_ds["input_text"]), preds, labels):
-            f.write('\t'.join([inp, pred, label]) + "\n")
+            f.write('\t'.join([inp, str(pred), str(label)]) + "\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
