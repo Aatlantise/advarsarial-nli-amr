@@ -33,6 +33,20 @@ def compute_binary_hans_metrics(eval_pred):
         "confusion_matrix": cm.tolist()
     }
 
+def compute_mnli_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=1)
+
+    acc = accuracy_score(labels, preds)
+    cm = confusion_matrix(labels, preds, labels=[0, 1, 2])
+
+    return {
+        "preds": preds,
+        "labels": labels,
+        "accuracy": acc,
+        "confusion_matrix": cm.tolist()
+    }
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -317,8 +331,13 @@ def bert_train(args):
 
     if not args.eval_only:
         trainer.train()
-    val_metrics = trainer.evaluate()
+
+    trainer.compute_metrics = compute_mnli_metrics
+    val_results = trainer.evaluate(dev_ds)
+    val_metrics = val_results["eval_accuracy"]
+    conf_mat = val_results["eval_confusion_matrix"]
     print("Validation performance:", val_metrics)
+    print("Confusion Matrix:\n", conf_mat)
 
     trainer.compute_metrics = compute_binary_hans_metrics
     results = trainer.evaluate(hans_ds)
