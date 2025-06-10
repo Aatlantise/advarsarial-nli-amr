@@ -249,6 +249,8 @@ class BERTGraphTrainer:
         with torch.no_grad():
             all_labels = []
             all_preds = []
+            correct = 0
+            total = 0
             for batch in tqdm(hans_loader, desc="Evaluating"):
                 _outputs = self.step(batch)
 
@@ -261,8 +263,7 @@ class BERTGraphTrainer:
                 total += labels.size(0)
 
                 all_labels += labels.cpu().tolist()
-                all_preds += labels.cpu().tolist()
-
+                all_preds += collapsed_preds.tolist()
         cm = confusion_matrix(
             all_labels,
             all_preds,
