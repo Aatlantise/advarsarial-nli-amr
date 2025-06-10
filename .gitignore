@@ -1,3 +1,5 @@
 .idea/*
 hf_token.txt
 *.txt
+*.xlsx
+*.pkl

@@ -332,6 +332,9 @@ def bert_train(args):
     if not args.eval_only:
         trainer.train()
 
+    bert_eval(trainer, dev_ds, hans_ds)
+
+def bert_eval(trainer, dev_ds, hans_ds):
     trainer.compute_metrics = compute_mnli_metrics
     val_results = trainer.evaluate(dev_ds)
     val_metrics = val_results["eval_accuracy"]
